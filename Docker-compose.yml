@@ -1,0 +1,171 @@
+services:
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:25.0
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+
+      KC_HOSTNAME: auth.localhost
+      KC_PROXY: edge
+      KC_HOSTNAME_STRICT: "true"
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.keycloak.rule=Host(`auth.localhost`)"
+      - "traefik.http.routers.keycloak.entrypoints=web"
+      - "traefik.http.services.keycloak.loadbalancer.server.port=8080"
+
+    networks:
+      - mynetwork
+
+
+  traefik:
+    image: traefik:v2.10
+    container_name: traefik
+    networks:
+      mynetwork:
+        aliases:
+          - auth.localhost
+    command:
+      - "--api.insecure=true"       # panel traefik
+      - "--providers.docker=true"   # używamy docker provider
+      - "--entrypoints.web.address=:80"  # port HTTP
+    ports:
+      - "80:80"
+      - "8079:8080"  # panel traefik
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+
+
+  mongo-posts:
+    image: mongo:7
+    container_name: mongo-posts
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: posts123
+    networks:
+      - mynetwork
+#    ports:
+#      - "27018:27017"
+    volumes:
+      - mongo-posts-data:/data/db
+
+  mongo-users:
+    image: mongo:7
+    container_name: mongo-users
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: users123
+#    ports:
+#      - "27019:27017"
+    volumes:
+      - mongo-users-data:/data/db
+    networks:
+      - mynetwork
+
+  mongo-events:
+    image: mongo:7
+    container_name: mongo-events
+    restart: always
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: events123
+#    ports:
+#      - "27020:27017"
+    volumes:
+      - mongo-events-data:/data/db
+    networks:
+      - mynetwork
+
+
+  posts-service:
+    build: ./posts
+    container_name: posts-service
+    depends_on:
+      - mongo-posts
+      - keycloak
+#    ports:
+#      - "8081:8080"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://admin:posts123@mongo-posts:27017/postsdb?authSource=admin
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://auth.localhost/realms/szyszka
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.posts-service.rule=PathPrefix(`/posts`)"
+      - "traefik.http.routers.posts-service.entrypoints=web"
+    networks:
+      - mynetwork
+
+  users-service:
+    build: ./users
+    container_name: users-service
+    depends_on:
+      - mongo-users
+      - keycloak
+#    ports:
+#      - "8082:8080"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://admin:users123@mongo-users:27017/usersdb?authSource=admin
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://auth.localhost/realms/szyszka
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.users-service.rule=PathPrefix(`/users`)"
+      - "traefik.http.routers.users-service.entrypoints=web"
+    networks:
+      - mynetwork
+
+  events-service:
+    build: ./events
+    container_name: events-service
+    depends_on:
+      - mongo-events
+      - keycloak
+#    ports:
+#      - "8083:8080"
+    environment:
+      SPRING_DATA_MONGODB_URI: mongodb://admin:events123@mongo-events:27017/eventsdb?authSource=admin
+      SPRING_SECURITY_OAUTH2_RESOURCESERVER_JWT_ISSUER_URI: http://auth.localhost/realms/szyszka
+    networks:
+      - mynetwork
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.events-service.rule=PathPrefix(`/api/wydarzenie`)"
+      - "traefik.http.routers.events-service.entrypoints=web"
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_KEYCLOAK_URL: http://auth.localhost
+        NEXT_PUBLIC_KEYCLOAK_REALM: szyszka
+        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: frontend
+        NEXT_PUBLIC_POSTS_URI: http://localhost/posts
+        NEXT_PUBLIC_EVENTS_URI: http://localhost/api/wydarzenie
+        NEXT_PUBLIC_USERS_URI: http://localhost/users
+#        NEXT_PUBLIC_USERS_API: http://localhost:8082
+#        NEXT_PUBLIC_POSTS_API: http://localhost:8081
+#        NEXT_PUBLIC_EVENTS_API: http://localhost:8083
+
+    container_name: frontend
+    depends_on:
+      - keycloak
+      - users-service
+      - posts-service
+      - events-service
+    ports:
+      - "3000:3000"
+    networks:
+      - mynetwork
+
+volumes:
+  mongo-posts-data:
+  mongo-users-data:
+  mongo-events-data:
+networks:
+  mynetwork:
+
+

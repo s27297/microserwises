@@ -1,0 +1,13 @@
+spring:
+    data:
+        mongodb:
+            uri: ${SPRING_DATA_MONGODB_URI}
+
+    security:
+        oauth2:
+            resourceserver:
+                jwt:
+                    issuer-uri: http://keycloak:8080/realms/szyszka
+
+server:
+    port: 8080
